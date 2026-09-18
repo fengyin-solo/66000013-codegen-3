@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Board } from '../types';
+import { Board, TemplateDraftGroup } from '../types';
 import { boardApi, templateApi } from '../services/api';
 import { useWhiteboardStore } from '../store/whiteboard';
 import { TemplateCenter } from './TemplateCenter';
 
 interface DashboardProps {
   onBoardSelect: (board: Board) => void;
+  onEditDraft: (group: TemplateDraftGroup) => void;
+  templatesRefreshKey?: number;
 }
 
 const formatDate = (dateStr: string): string => {
@@ -129,7 +131,11 @@ const BoardCard: React.FC<{
   );
 };
 
-export const Dashboard: React.FC<DashboardProps> = ({ onBoardSelect }) => {
+export const Dashboard: React.FC<DashboardProps> = ({
+  onBoardSelect,
+  onEditDraft,
+  templatesRefreshKey,
+}) => {
   const [boards, setBoards] = useState<Board[]>([]);
   const [loading, setLoading] = useState(true);
   const [isTemplateCenterOpen, setIsTemplateCenterOpen] = useState(false);
@@ -474,6 +480,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onBoardSelect }) => {
         isOpen={isTemplateCenterOpen}
         onClose={() => setIsTemplateCenterOpen(false)}
         onCreate={handleCreateBoard}
+        onEditDraft={onEditDraft}
+        refreshKey={templatesRefreshKey}
       />
     </div>
   );

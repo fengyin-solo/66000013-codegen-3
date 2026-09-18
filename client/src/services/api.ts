@@ -1,7 +1,41 @@
-import { Board, Template } from '../types';
+import { Board, Template, TemplateDraftGroup, TemplateDraftSummary } from '../types';
 
 const API_BASE_URL = '/api/boards';
 const TEMPLATE_API_URL = '/api/templates';
+
+export class TemplatePublishError extends Error {
+  status: number;
+  reason?: string;
+  missingFields?: Array<{ field: string; label: string }>;
+  existingVersion?: number;
+
+  constructor(
+    message: string,
+    details: {
+      status: number;
+      reason?: string;
+      missingFields?: Array<{ field: string; label: string }>;
+      existingVersion?: number;
+    }
+  ) {
+    super(message);
+    this.name = 'TemplatePublishError';
+    this.status = details.status;
+    this.reason = details.reason;
+    this.missingFields = details.missingFields;
+    this.existingVersion = details.existingVersion;
+  }
+}
+
+const parseErrorBody = async (
+  response: Response
+): Promise<{
+  error?: string;
+  reason?: string;
+  missingFields?: Array<{ field: string; label: string }>;
+  existingVersion?: number;
+}> => response.json().catch(() => ({}));
+
 
 export const boardApi = {
   async getBoards(userId: string): Promise<Board[]> {
@@ -116,7 +150,7 @@ export const boardApi = {
   },
 };
 
-const mockTemplates: Template[] = [
+export const mockTemplates: Template[] = [
   {
     _id: 'template-meeting',
     name: '会议纪要',
@@ -152,7 +186,7 @@ const mockTemplates: Template[] = [
   },
 ];
 
-const createMockBoardFromTemplate = (
+export const createMockBoardFromTemplate = (
   template: Template,
   data: { name: string; ownerId: string }
 ): Board => {
@@ -201,9 +235,138 @@ export const templateApi = {
       body: JSON.stringify(data),
     });
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
+      const errorData = await parseErrorBody(response);
       throw new Error(errorData.error || 'Failed to create board from template');
     }
     return response.json();
+  },
+
+  async getDrafts(ownerId: string): Promise<TemplateDraftSummary[]> {
+    const response = await fetch(`${TEMPLATE_API_URL}/drafts?ownerId=${encodeURIComponent(ownerId)}`);
+    if (!response.ok) {
+      const errorData = await parseErrorBody(response);
+      throw new Error(errorData.error || 'Failed to fetch template drafts');
+    }
+    return response.json();
+  },
+
+  async getDraft(groupId: string, ownerId: string): Promise<TemplateDraftGroup | null> {
+    const response = await fetch(
+      `${TEMPLATE_API_URL}/drafts/${groupId}?ownerId=${encodeURIComponent(ownerId)}`
+    );
+    if (!response.ok) {
+      if (response.status === 404) return null;
+      const errorData = await parseErrorBody(response);
+      throw new Error(errorData.error || 'Failed to fetch template draft');
+    }
+    return response.json();
+  },
+
+  async createDraft(data: {
+    ownerId: string;
+    boardId?: string;
+    name?: string;
+    content: {
+      width: number;
+      height: number;
+      backgroundColor: string;
+      layers: Template['layers'];
+    };
+  }): Promise<TemplateDraftGroup> {
+    const response = await fetch(`${TEMPLATE_API_URL}/drafts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) {
+      const errorData = await parseErrorBody(response);
+      throw new Error(errorData.error || 'Failed to create template draft');
+    }
+    return response.json();
+  },
+
+  async saveDraft(
+    groupId: string,
+    version: number,
+    data: {
+      ownerId: string;
+      name: string;
+      description: string;
+      category: string;
+      useCases: string[];
+      icon: string;
+      thumbnail: string;
+    }
+  ): Promise<TemplateDraftGroup> {
+    const response = await fetch(
+      `${TEMPLATE_API_URL}/drafts/${groupId}/versions/${version}`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      }
+    );
+    if (!response.ok) {
+      const errorData = await parseErrorBody(response);
+      throw new Error(errorData.error || 'Failed to save template draft');
+    }
+    return response.json();
+  },
+
+  async addDraftVersion(
+    groupId: string,
+    data: { ownerId: string; fromVersion?: number }
+  ): Promise<{ group: TemplateDraftGroup; version: TemplateDraftGroup['versions'][number] }> {
+    const response = await fetch(`${TEMPLATE_API_URL}/drafts/${groupId}/versions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) {
+      const errorData = await parseErrorBody(response);
+      throw new Error(errorData.error || 'Failed to create template version');
+    }
+    return response.json();
+  },
+
+  async publishDraft(
+    groupId: string,
+    version: number,
+    data: {
+      ownerId: string;
+      name: string;
+      description: string;
+      category: string;
+      useCases: string[];
+      icon: string;
+      thumbnail: string;
+    }
+  ): Promise<{ templateId: string; group: TemplateDraftGroup }> {
+    const response = await fetch(
+      `${TEMPLATE_API_URL}/drafts/${groupId}/versions/${version}/publish`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      }
+    );
+    if (!response.ok) {
+      const errorData = await parseErrorBody(response);
+      throw new TemplatePublishError(errorData.error || 'Failed to publish template', {
+        status: response.status,
+        reason: errorData.reason,
+        missingFields: errorData.missingFields,
+        existingVersion: errorData.existingVersion,
+      });
+    }
+    return response.json();
+  },
+
+  async deleteDraft(groupId: string, ownerId: string): Promise<boolean> {
+    const response = await fetch(
+      `${TEMPLATE_API_URL}/drafts/${groupId}?ownerId=${encodeURIComponent(ownerId)}`,
+      { method: 'DELETE' }
+    );
+    return response.ok;
   },
 };

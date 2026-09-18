@@ -4,13 +4,22 @@ import { Toolbar } from './components/Toolbar';
 import { LayerPanel } from './components/LayerPanel';
 import { CursorOverlay } from './components/CursorOverlay';
 import { Dashboard } from './components/Dashboard';
+import { TemplateDraftEditor } from './components/TemplateDraftEditor';
 import { useWhiteboardStore } from './store/whiteboard';
 import { socketService } from './services/socket';
-import { Board, BoardElement, CursorPosition, Layer, CanvasTransform, ViewType } from './types';
+import { templateApi } from './services/api';
+import { Board, BoardElement, CursorPosition, Layer, CanvasTransform, ViewType, TemplateDraftGroup } from './types';
+
+const CURRENT_USER_ID = 'user-1';
 
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<ViewType>('dashboard');
   const [activeBoard, setActiveBoard] = useState<Board | null>(null);
+  const [draftGroup, setDraftGroup] = useState<TemplateDraftGroup | null>(null);
+  const [draftEditorOpen, setDraftEditorOpen] = useState(false);
+  // Bumped when template drafts/featured templates change so views can refresh.
+  const [templatesRefreshKey, setTemplatesRefreshKey] = useState(0);
+  const [savingTemplate, setSavingTemplate] = useState(false);
   const {
     setBoard, updateCursor, removeCursor, setCursors, username
   } = useWhiteboardStore();
@@ -71,8 +80,62 @@ const App: React.FC = () => {
     setActiveBoard(null);
   };
 
+  const openDraftEditor = (group: TemplateDraftGroup) => {
+    setDraftGroup(group);
+    setDraftEditorOpen(true);
+  };
+
+  // Organize the current board into a reusable template draft, then open the
+  // editor so use cases / icon / preview can be completed before publishing.
+  const handleSaveBoardAsTemplate = async () => {
+    const { board } = useWhiteboardStore.getState();
+    if (!board || savingTemplate) return;
+
+    try {
+      setSavingTemplate(true);
+      const group = await templateApi.createDraft({
+        ownerId: CURRENT_USER_ID,
+        boardId: board._id,
+        name: board.name,
+        content: {
+          width: board.width,
+          height: board.height,
+          backgroundColor: board.backgroundColor,
+          layers: board.layers,
+        },
+      });
+      openDraftEditor(group);
+    } catch (error) {
+      console.error('Failed to create template draft:', error);
+      window.alert('保存为模板草稿失败，请重试');
+    } finally {
+      setSavingTemplate(false);
+    }
+  };
+
   if (currentView === 'dashboard') {
-    return <Dashboard onBoardSelect={handleBoardSelect} />;
+    return (
+      <>
+        <Dashboard
+          onBoardSelect={handleBoardSelect}
+          onEditDraft={openDraftEditor}
+          templatesRefreshKey={templatesRefreshKey}
+        />
+        <TemplateDraftEditor
+          isOpen={draftEditorOpen}
+          group={draftGroup}
+          onClose={() => setDraftEditorOpen(false)}
+          onGroupChanged={(group) => {
+            setDraftGroup(group);
+            setTemplatesRefreshKey((key) => key + 1);
+          }}
+          onPublished={(group) => {
+            setDraftGroup(group);
+            setTemplatesRefreshKey((key) => key + 1);
+          }}
+        />
+      </>
+    );
   }
 
   return (
@@ -121,6 +184,33 @@ const App: React.FC = () => {
         }}>
           {activeBoard?.name}
         </div>
+        <button
+          onClick={handleSaveBoardAsTemplate}
+          disabled={savingTemplate}
+          title="把当前白板内容整理为可复用模板（先存草稿，完善信息后发布）"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            marginLeft: 'auto',
+            padding: '6px 14px',
+            fontSize: '13px',
+            fontWeight: 500,
+            color: '#5a67d8',
+            background: '#eef2ff',
+            border: 'none',
+            borderRadius: '6px',
+            cursor: savingTemplate ? 'not-allowed' : 'pointer',
+            opacity: savingTemplate ? 0.6 : 1,
+          }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+            <polyline points="17 21 17 13 7 13 7 21" />
+            <polyline points="7 3 7 8 15 8" />
+          </svg>
+          {savingTemplate ? '保存中...' : '存为模板'}
+        </button>
       </div>
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
         <Toolbar />
@@ -130,6 +220,19 @@ const App: React.FC = () => {
         </div>
         <LayerPanel />
       </div>
+      <TemplateDraftEditor
+        isOpen={draftEditorOpen}
+        group={draftGroup}
+        onClose={() => setDraftEditorOpen(false)}
+        onGroupChanged={(group) => {
+          setDraftGroup(group);
+          setTemplatesRefreshKey((key) => key + 1);
+        }}
+        onPublished={(group) => {
+          setDraftGroup(group);
+          setTemplatesRefreshKey((key) => key + 1);
+        }}
+      />
     </div>
   );
 };

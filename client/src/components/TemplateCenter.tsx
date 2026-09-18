@@ -1,29 +1,56 @@
 import React, { useState, useEffect } from 'react';
-import { Template } from '../types';
+import { Template, TemplateDraftGroup, TemplateDraftSummary } from '../types';
 import { templateApi } from '../services/api';
+
+const CURRENT_USER_ID = 'user-1';
+
+type CenterTab = 'use' | 'drafts';
 
 interface TemplateCenterProps {
   isOpen: boolean;
   onClose: () => void;
   onCreate: (name: string, templateId?: string) => void;
+  onEditDraft: (group: TemplateDraftGroup) => void;
+  /** Bumped when templates/drafts change so lists can be reloaded. */
+  refreshKey?: number;
 }
 
-export const TemplateCenter: React.FC<TemplateCenterProps> = ({ isOpen, onClose, onCreate }) => {
+export const TemplateCenter: React.FC<TemplateCenterProps> = ({
+  isOpen,
+  onClose,
+  onCreate,
+  onEditDraft,
+  refreshKey,
+}) => {
+  const [activeTab, setActiveTab] = useState<CenterTab>('use');
   const [templates, setTemplates] = useState<Template[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState<TemplateDraftSummary[]>([]);
+  const [draftsLoading, setDraftsLoading] = useState(false);
+  const [draftActionId, setDraftActionId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      setActiveTab('use');
+      setSelectedTemplate(null);
+      setName('');
+      setError(null);
+      loadTemplates();
+      loadDrafts();
+    }
+  }, [isOpen]);
 
   useEffect(() => {
     if (isOpen) {
       loadTemplates();
-      setSelectedTemplate(null);
-      setName('');
-      setError(null);
+      loadDrafts();
     }
-  }, [isOpen]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey]);
 
   const loadTemplates = async () => {
     try {
@@ -36,6 +63,51 @@ export const TemplateCenter: React.FC<TemplateCenterProps> = ({ isOpen, onClose,
       setError('加载模板失败，请刷新重试');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadDrafts = async () => {
+    try {
+      setDraftsLoading(true);
+      const data = await templateApi.getDrafts(CURRENT_USER_ID);
+      setDrafts(data);
+    } catch (error) {
+      console.error('Failed to load template drafts:', error);
+    } finally {
+      setDraftsLoading(false);
+    }
+  };
+
+  const handleContinueDraft = async (draftId: string) => {
+    if (draftActionId) return;
+    try {
+      setDraftActionId(draftId);
+      const group = await templateApi.getDraft(draftId, CURRENT_USER_ID);
+      if (group) {
+        onEditDraft(group);
+      }
+    } catch (error) {
+      console.error('Failed to open draft:', error);
+      setError('打开草稿失败，请重试');
+    } finally {
+      setDraftActionId(null);
+    }
+  };
+
+  const handleDeleteDraft = async (draftId: string) => {
+    if (draftActionId) return;
+    if (!window.confirm('删除这份草稿？删除后无法恢复（已发布的模板不受影响）。')) return;
+    try {
+      setDraftActionId(draftId);
+      const ok = await templateApi.deleteDraft(draftId, CURRENT_USER_ID);
+      if (ok) {
+        setDrafts((prev) => prev.filter((d) => d._id !== draftId));
+      }
+    } catch (error) {
+      console.error('Failed to delete draft:', error);
+      setError('删除草稿失败，请重试');
+    } finally {
+      setDraftActionId(null);
     }
   };
 
@@ -125,6 +197,23 @@ export const TemplateCenter: React.FC<TemplateCenterProps> = ({ isOpen, onClose,
           position: 'relative',
         }}
       >
+        {template.custom && (
+          <span
+            style={{
+              position: 'absolute',
+              top: '8px',
+              left: '8px',
+              padding: '2px 8px',
+              fontSize: '11px',
+              fontWeight: 600,
+              color: '#fff',
+              background: 'rgba(0,0,0,0.35)',
+              borderRadius: '999px',
+            }}
+          >
+            自定义{template.version ? ` V${template.version}` : ''}
+          </span>
+        )}
         <span
           style={{
             fontSize: '48px',
@@ -214,10 +303,10 @@ export const TemplateCenter: React.FC<TemplateCenterProps> = ({ isOpen, onClose,
       >
         <div
           style={{
-            padding: '24px 32px',
+            padding: '24px 32px 0',
             borderBottom: '1px solid #e5e7eb',
             display: 'flex',
-            alignItems: 'center',
+            alignItems: 'flex-start',
             justifyContent: 'space-between',
           }}
         >
@@ -234,13 +323,46 @@ export const TemplateCenter: React.FC<TemplateCenterProps> = ({ isOpen, onClose,
             </h2>
             <p
               style={{
-                margin: '4px 0 0',
+                margin: '4px 0 16px',
                 fontSize: '14px',
                 color: '#6b7280',
               }}
             >
-              选择一个模板快速开始，或创建空白白板
+              {activeTab === 'use'
+                ? '选择一个模板快速开始，或创建空白白板'
+                : '继续完善从白板整理出的模板草稿，完成后发布到精选模板'}
             </p>
+            <div style={{ display: 'flex', gap: '4px' }}>
+              {(
+                [
+                  { key: 'use', label: '使用模板' },
+                  { key: 'drafts', label: `我的草稿${drafts.length > 0 ? ` (${drafts.length})` : ''}` },
+                ] as Array<{ key: CenterTab; label: string }>
+              ).map((tab) => (
+                <button
+                  key={tab.key}
+                  type="button"
+                  onClick={() => {
+                    setActiveTab(tab.key);
+                    setError(null);
+                  }}
+                  style={{
+                    padding: '8px 18px',
+                    fontSize: '14px',
+                    fontWeight: activeTab === tab.key ? 600 : 500,
+                    color: activeTab === tab.key ? '#5a67d8' : '#6b7280',
+                    background: 'transparent',
+                    border: 'none',
+                    borderBottom:
+                      activeTab === tab.key ? '2px solid #667eea' : '2px solid transparent',
+                    cursor: 'pointer',
+                    marginBottom: '-1px',
+                  }}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
           </div>
           <button
             onClick={onClose}
@@ -271,6 +393,7 @@ export const TemplateCenter: React.FC<TemplateCenterProps> = ({ isOpen, onClose,
         </div>
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+          {activeTab === 'use' && (
           <div
             style={{
               padding: '24px 32px',
@@ -317,7 +440,9 @@ export const TemplateCenter: React.FC<TemplateCenterProps> = ({ isOpen, onClose,
               }}
             />
           </div>
+          )}
 
+          {activeTab === 'use' && (
           <div
             style={{
               flex: 1,
@@ -494,6 +619,163 @@ export const TemplateCenter: React.FC<TemplateCenterProps> = ({ isOpen, onClose,
               )}
             </div>
           </div>
+          )}
+
+          {activeTab === 'drafts' && (
+            <div style={{ flex: 1, overflowY: 'auto', padding: '24px 32px' }}>
+              {draftsLoading ? (
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
+                    gap: '16px',
+                  }}
+                >
+                  {[1, 2].map((i) => (
+                    <div
+                      key={i}
+                      style={{
+                        borderRadius: '12px',
+                        height: '150px',
+                        background: '#f3f4f6',
+                        animation: 'pulse 1.5s ease-in-out infinite',
+                      }}
+                    />
+                  ))}
+                </div>
+              ) : drafts.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '56px 16px', color: '#6b7280' }}>
+                  <span style={{ fontSize: '40px' }}>📝</span>
+                  <p style={{ margin: '12px 0 4px', fontSize: '14px' }}>还没有模板草稿</p>
+                  <p style={{ margin: 0, fontSize: '13px' }}>
+                    在白板中点击「存为模板」，即可把当前白板整理成可复用模板
+                  </p>
+                </div>
+              ) : (
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
+                    gap: '16px',
+                  }}
+                >
+                  {drafts.map((draft) => {
+                    const draftVersions = draft.versions.filter((v) => v.status === 'draft');
+                    const publishedVersions = draft.versions.filter(
+                      (v) => v.status === 'published'
+                    );
+                    return (
+                      <div
+                        key={draft._id}
+                        style={{
+                          border: '1px solid #e5e7eb',
+                          borderRadius: '12px',
+                          padding: '16px',
+                          background: '#fff',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '10px',
+                        }}
+                      >
+                        <div>
+                          <div
+                            style={{
+                              fontSize: '15px',
+                              fontWeight: 600,
+                              color: '#1a1a1a',
+                              marginBottom: '4px',
+                            }}
+                          >
+                            {draft.name || '未命名模板'}
+                          </div>
+                          <div style={{ fontSize: '12px', color: '#9ca3af' }}>
+                            {draftVersions.length} 个草稿版本
+                            {publishedVersions.length > 0 &&
+                              ` · ${publishedVersions.length} 个已发布`}
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                          {draft.versions.map((v) => (
+                            <span
+                              key={v.version}
+                              style={{
+                                fontSize: '11px',
+                                padding: '2px 8px',
+                                borderRadius: '999px',
+                                background: v.status === 'published' ? '#f0fdf4' : '#fffbeb',
+                                color: v.status === 'published' ? '#15803d' : '#b45309',
+                                border:
+                                  v.status === 'published'
+                                    ? '1px solid #bbf7d0'
+                                    : '1px solid #fde68a',
+                              }}
+                            >
+                              V{v.version}
+                              {v.status === 'published' ? ' 已发布' : ' 草稿'}
+                            </span>
+                          ))}
+                        </div>
+                        <div
+                          style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            marginTop: 'auto',
+                          }}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => handleContinueDraft(draft._id)}
+                            disabled={draftActionId === draft._id}
+                            style={{
+                              padding: '6px 14px',
+                              fontSize: '13px',
+                              fontWeight: 500,
+                              color: '#fff',
+                              background: '#667eea',
+                              border: 'none',
+                              borderRadius: '6px',
+                              cursor:
+                                draftActionId === draft._id ? 'not-allowed' : 'pointer',
+                            }}
+                          >
+                            {draftActionId === draft._id ? '加载中...' : '继续编辑'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteDraft(draft._id)}
+                            disabled={draftActionId === draft._id}
+                            style={{
+                              padding: '6px 12px',
+                              fontSize: '13px',
+                              color: '#6b7280',
+                              background: 'transparent',
+                              border: 'none',
+                              borderRadius: '6px',
+                              cursor:
+                                draftActionId === draft._id ? 'not-allowed' : 'pointer',
+                            }}
+                          >
+                            删除
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              <p
+                style={{
+                  marginTop: '20px',
+                  fontSize: '12px',
+                  color: '#9ca3af',
+                  textAlign: 'center',
+                }}
+              >
+                草稿不会出现在「使用模板」入口，发布后才会进入精选模板
+              </p>
+            </div>
+          )}
 
           <div
             style={{
@@ -524,117 +806,140 @@ export const TemplateCenter: React.FC<TemplateCenterProps> = ({ isOpen, onClose,
                 alignItems: 'center',
               }}
             >
-              <div style={{ fontSize: '13px', color: '#6b7280' }}>
-                {selectedTemplate
-                  ? `已选择：${templates.find((t) => t._id === selectedTemplate)?.name}`
-                  : '已选择：空白白板'}
-              </div>
-              <div style={{ display: 'flex', gap: '12px' }}>
-                <button
-                  type="button"
-                  onClick={onClose}
-                  disabled={creating}
-                  style={{
-                    padding: '10px 20px',
-                    fontSize: '14px',
-                    fontWeight: 500,
-                    color: '#374151',
-                    background: '#e5e7eb',
-                    border: 'none',
-                    borderRadius: '8px',
-                    cursor: creating ? 'not-allowed' : 'pointer',
-                    opacity: creating ? 0.5 : 1,
-                  }}
-                >
-                  取消
-                </button>
-                {selectedTemplate === null ? (
+              {activeTab === 'use' ? (
+                <>
+                  <div style={{ fontSize: '13px', color: '#6b7280' }}>
+                    {selectedTemplate
+                      ? `已选择：${templates.find((t) => t._id === selectedTemplate)?.name}`
+                      : '已选择：空白白板'}
+                  </div>
+                  <div style={{ display: 'flex', gap: '12px' }}>
+                    <button
+                      type="button"
+                      onClick={onClose}
+                      disabled={creating}
+                      style={{
+                        padding: '10px 20px',
+                        fontSize: '14px',
+                        fontWeight: 500,
+                        color: '#374151',
+                        background: '#e5e7eb',
+                        border: 'none',
+                        borderRadius: '8px',
+                        cursor: creating ? 'not-allowed' : 'pointer',
+                        opacity: creating ? 0.5 : 1,
+                      }}
+                    >
+                      取消
+                    </button>
+                    {selectedTemplate === null ? (
+                      <button
+                        type="button"
+                        onClick={handleCreateBlank}
+                        disabled={creating}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          padding: '10px 24px',
+                          fontSize: '14px',
+                          fontWeight: 500,
+                          color: '#fff',
+                          background: '#667eea',
+                          border: 'none',
+                          borderRadius: '8px',
+                          cursor: creating ? 'not-allowed' : 'pointer',
+                          transition: 'background 0.2s',
+                          opacity: creating ? 0.8 : 1,
+                        }}
+                        onMouseEnter={(e) => {
+                          if (!creating) e.currentTarget.style.background = '#5a67d8';
+                        }}
+                        onMouseLeave={(e) => {
+                          if (!creating) e.currentTarget.style.background = '#667eea';
+                        }}
+                      >
+                        {creating && (
+                          <svg
+                            width="16"
+                            height="16"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            style={{ animation: 'spin 1s linear infinite' }}
+                          >
+                            <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
+                            <path d="M4 12a8 8 0 018-8" />
+                          </svg>
+                        )}
+                        {creating ? '创建中...' : '创建空白白板'}
+                      </button>
+                    ) : (
+                      <button
+                        type="submit"
+                        disabled={creating}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          padding: '10px 24px',
+                          fontSize: '14px',
+                          fontWeight: 500,
+                          color: '#fff',
+                          background: '#667eea',
+                          border: 'none',
+                          borderRadius: '8px',
+                          cursor: creating ? 'not-allowed' : 'pointer',
+                          transition: 'background 0.2s',
+                          opacity: creating ? 0.8 : 1,
+                        }}
+                        onMouseEnter={(e) => {
+                          if (!creating) e.currentTarget.style.background = '#5a67d8';
+                        }}
+                        onMouseLeave={(e) => {
+                          if (!creating) e.currentTarget.style.background = '#667eea';
+                        }}
+                      >
+                        {creating && (
+                          <svg
+                            width="16"
+                            height="16"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            style={{ animation: 'spin 1s linear infinite' }}
+                          >
+                            <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
+                            <path d="M4 12a8 8 0 018-8" />
+                          </svg>
+                        )}
+                        {creating ? '创建中...' : '使用模板创建'}
+                      </button>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <div style={{ width: '100%', display: 'flex', justifyContent: 'flex-end' }}>
                   <button
                     type="button"
-                    onClick={handleCreateBlank}
-                    disabled={creating}
+                    onClick={onClose}
                     style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      padding: '10px 24px',
+                      padding: '10px 20px',
                       fontSize: '14px',
                       fontWeight: 500,
-                      color: '#fff',
-                      background: '#667eea',
+                      color: '#374151',
+                      background: '#e5e7eb',
                       border: 'none',
                       borderRadius: '8px',
-                      cursor: creating ? 'not-allowed' : 'pointer',
-                      transition: 'background 0.2s',
-                      opacity: creating ? 0.8 : 1,
-                    }}
-                    onMouseEnter={(e) => {
-                      if (!creating) e.currentTarget.style.background = '#5a67d8';
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!creating) e.currentTarget.style.background = '#667eea';
+                      cursor: 'pointer',
                     }}
                   >
-                    {creating && (
-                      <svg
-                        width="16"
-                        height="16"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        style={{ animation: 'spin 1s linear infinite' }}
-                      >
-                        <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
-                        <path d="M4 12a8 8 0 018-8" />
-                      </svg>
-                    )}
-                    {creating ? '创建中...' : '创建空白白板'}
+                    关闭
                   </button>
-                ) : (
-                  <button
-                    type="submit"
-                    disabled={creating}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      padding: '10px 24px',
-                      fontSize: '14px',
-                      fontWeight: 500,
-                      color: '#fff',
-                      background: '#667eea',
-                      border: 'none',
-                      borderRadius: '8px',
-                      cursor: creating ? 'not-allowed' : 'pointer',
-                      transition: 'background 0.2s',
-                      opacity: creating ? 0.8 : 1,
-                    }}
-                    onMouseEnter={(e) => {
-                      if (!creating) e.currentTarget.style.background = '#5a67d8';
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!creating) e.currentTarget.style.background = '#667eea';
-                    }}
-                  >
-                    {creating && (
-                      <svg
-                        width="16"
-                        height="16"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        style={{ animation: 'spin 1s linear infinite' }}
-                      >
-                        <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
-                        <path d="M4 12a8 8 0 018-8" />
-                      </svg>
-                    )}
-                    {creating ? '创建中...' : '使用模板创建'}
-                  </button>
-                )}
-              </div>
+                </div>
+              )}
             </div>
           </div>
         </form>
