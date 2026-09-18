@@ -474,6 +474,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onBoardSelect }) => {
         isOpen={isTemplateCenterOpen}
         onClose={() => setIsTemplateCenterOpen(false)}
         onCreate={handleCreateBoard}
+        userId={userId}
       />
     </div>
   );

@@ -64,3 +64,37 @@ export interface Template {
   backgroundColor: string;
   layers?: Layer[];
 }
+
+export interface TemplateVersion {
+  versionId: string;
+  versionNumber: number;
+  note: string;
+  snapshot: {
+    width: number;
+    height: number;
+    backgroundColor: string;
+    layers: Layer[];
+  };
+  createdAt: string;
+}
+
+export interface TemplateDraft {
+  _id: string;
+  name: string;
+  ownerId: string;
+  sourceBoardId: string;
+  status: 'draft' | 'published';
+  scenario: string;
+  icon: string;
+  preview: string;
+  category: string;
+  versions: TemplateVersion[];
+  currentVersionId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PublishResult {
+  template: Template;
+  duplicated: boolean;
+}

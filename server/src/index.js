@@ -24,8 +24,10 @@ initStorage();
 // Routes
 const boardRoutes = require('./routes/boards');
 const templateRoutes = require('./routes/templates');
+const templateDraftRoutes = require('./routes/templateDrafts');
 app.use('/api/boards', boardRoutes);
 app.use('/api/templates', templateRoutes);
+app.use('/api/template-drafts', templateDraftRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

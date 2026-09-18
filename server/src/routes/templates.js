@@ -2,10 +2,17 @@ const express = require('express');
 const router = express.Router();
 const { Board } = require('../storage');
 const { getTemplates, getTemplateById } = require('../templates');
+const { PublishedTemplateStore } = require('../templateStore');
+
+// Only published templates (built-in + user-published) are exposed here.
+// Drafts are never listed so they cannot be used to create boards.
+const findTemplate = (id) => {
+  return getTemplateById(id) || PublishedTemplateStore.getById(id);
+};
 
 router.get('/', (req, res) => {
   try {
-    const templates = getTemplates();
+    const templates = [...getTemplates(), ...PublishedTemplateStore.list()];
     const simplified = templates.map((t) => ({
       _id: t._id,
       name: t.name,
@@ -25,7 +32,7 @@ router.get('/', (req, res) => {
 
 router.get('/:id', (req, res) => {
   try {
-    const template = getTemplateById(req.params.id);
+    const template = findTemplate(req.params.id);
     if (!template) {
       return res.status(404).json({ error: 'Template not found' });
     }
@@ -38,7 +45,7 @@ router.get('/:id', (req, res) => {
 router.post('/:id/create', async (req, res) => {
   try {
     const { name, ownerId } = req.body;
-    const template = getTemplateById(req.params.id);
+    const template = findTemplate(req.params.id);
 
     if (!template) {
       return res.status(404).json({ error: 'Template not found' });

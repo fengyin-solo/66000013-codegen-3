@@ -1,7 +1,8 @@
-import { Board, Template } from '../types';
+import { Board, Template, TemplateDraft, PublishResult } from '../types';
 
 const API_BASE_URL = '/api/boards';
 const TEMPLATE_API_URL = '/api/templates';
+const TEMPLATE_DRAFT_API_URL = '/api/template-drafts';
 
 export const boardApi = {
   async getBoards(userId: string): Promise<Board[]> {
@@ -205,5 +206,110 @@ export const templateApi = {
       throw new Error(errorData.error || 'Failed to create board from template');
     }
     return response.json();
+  },
+};
+
+export class PublishError extends Error {
+  missing: string[];
+  missingLabels: string[];
+
+  constructor(message: string, missing: string[] = [], missingLabels: string[] = []) {
+    super(message);
+    this.missing = missing;
+    this.missingLabels = missingLabels;
+  }
+}
+
+export const templateDraftApi = {
+  async getDrafts(ownerId: string): Promise<TemplateDraft[]> {
+    const response = await fetch(`${TEMPLATE_DRAFT_API_URL}?ownerId=${ownerId}`);
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || 'Failed to fetch template drafts');
+    }
+    return response.json();
+  },
+
+  async createDraft(data: { boardId: string; name?: string; ownerId: string }): Promise<TemplateDraft> {
+    const response = await fetch(TEMPLATE_DRAFT_API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || 'Failed to create template draft');
+    }
+    return response.json();
+  },
+
+  async updateDraft(
+    draftId: string,
+    data: Partial<Pick<TemplateDraft, 'name' | 'scenario' | 'icon' | 'preview'>>
+  ): Promise<TemplateDraft> {
+    const response = await fetch(`${TEMPLATE_DRAFT_API_URL}/${draftId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || 'Failed to update template draft');
+    }
+    return response.json();
+  },
+
+  async addVersion(draftId: string, data: { boardId?: string; note?: string } = {}): Promise<TemplateDraft> {
+    const response = await fetch(`${TEMPLATE_DRAFT_API_URL}/${draftId}/versions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || 'Failed to add draft version');
+    }
+    return response.json();
+  },
+
+  async switchVersion(draftId: string, versionId: string): Promise<TemplateDraft> {
+    const response = await fetch(`${TEMPLATE_DRAFT_API_URL}/${draftId}/current-version`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ versionId }),
+    });
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || 'Failed to switch draft version');
+    }
+    return response.json();
+  },
+
+  async publishDraft(
+    draftId: string,
+    data: Partial<Pick<TemplateDraft, 'name' | 'scenario' | 'icon' | 'preview'>>
+  ): Promise<PublishResult> {
+    const response = await fetch(`${TEMPLATE_DRAFT_API_URL}/${draftId}/publish`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      if (response.status === 400 && Array.isArray(errorData.missing)) {
+        throw new PublishError(
+          errorData.error || '发布未完成',
+          errorData.missing,
+          errorData.missingLabels || []
+        );
+      }
+      throw new Error(errorData.error || 'Failed to publish template draft');
+    }
+    return response.json();
+  },
+
+  async deleteDraft(draftId: string): Promise<boolean> {
+    const response = await fetch(`${TEMPLATE_DRAFT_API_URL}/${draftId}`, { method: 'DELETE' });
+    return response.ok;
   },
 };

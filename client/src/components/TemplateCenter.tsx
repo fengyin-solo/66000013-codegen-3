@@ -1,27 +1,38 @@
 import React, { useState, useEffect } from 'react';
-import { Template } from '../types';
-import { templateApi } from '../services/api';
+import { Board, Template, TemplateDraft } from '../types';
+import { boardApi, templateApi, templateDraftApi } from '../services/api';
+import { TemplateDraftEditor } from './TemplateDraftEditor';
 
 interface TemplateCenterProps {
   isOpen: boolean;
   onClose: () => void;
   onCreate: (name: string, templateId?: string) => void;
+  userId: string;
 }
 
-export const TemplateCenter: React.FC<TemplateCenterProps> = ({ isOpen, onClose, onCreate }) => {
+export const TemplateCenter: React.FC<TemplateCenterProps> = ({ isOpen, onClose, onCreate, userId }) => {
   const [templates, setTemplates] = useState<Template[]>([]);
+  const [boards, setBoards] = useState<Board[]>([]);
+  const [drafts, setDrafts] = useState<TemplateDraft[]>([]);
+  const [editingDraft, setEditingDraft] = useState<TemplateDraft | null>(null);
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [draftWorking, setDraftWorking] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOpen) {
       loadTemplates();
+      loadBoards();
+      loadDrafts();
       setSelectedTemplate(null);
       setName('');
       setError(null);
+      setNotice(null);
+      setEditingDraft(null);
     }
   }, [isOpen]);
 
@@ -39,7 +50,50 @@ export const TemplateCenter: React.FC<TemplateCenterProps> = ({ isOpen, onClose,
     }
   };
 
+  const loadBoards = async () => {
+    try {
+      const data = await boardApi.getBoards(userId);
+      setBoards(data.filter((b) => b.ownerId === userId));
+    } catch (error) {
+      console.error('Failed to load boards:', error);
+    }
+  };
+
+  const loadDrafts = async () => {
+    try {
+      const data = await templateDraftApi.getDrafts(userId);
+      setDrafts(data);
+    } catch (error) {
+      console.error('Failed to load template drafts:', error);
+    }
+  };
+
   if (!isOpen) return null;
+
+  const handleCreateDraftFromBoard = async (board: Board) => {
+    if (draftWorking) return;
+    try {
+      setDraftWorking(true);
+      setError(null);
+      const draft = await templateDraftApi.createDraft({
+        boardId: board._id,
+        name: board.name,
+        ownerId: userId,
+      });
+      await loadDrafts();
+      setEditingDraft(draft);
+    } catch (error) {
+      console.error('Failed to create draft from board:', error);
+      setError('创建模板草稿失败，请重试');
+    } finally {
+      setDraftWorking(false);
+    }
+  };
+
+  const handlePublished = async (message: string) => {
+    setNotice(message);
+    await Promise.all([loadTemplates(), loadDrafts()]);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -493,6 +547,182 @@ export const TemplateCenter: React.FC<TemplateCenterProps> = ({ isOpen, onClose,
                 </div>
               )}
             </div>
+
+            <div style={{ marginTop: '24px' }}>
+              <h3
+                style={{
+                  margin: '0 0 16px',
+                  fontSize: '15px',
+                  fontWeight: 600,
+                  color: '#374151',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                }}
+              >
+                <span>🗂️</span> 我的模板草稿
+                <span style={{ fontSize: '12px', color: '#9ca3af', fontWeight: 400 }}>
+                  草稿不会出现在上方使用入口，发布后才可用来创建白板
+                </span>
+              </h3>
+              {drafts.length === 0 ? (
+                <p style={{ margin: 0, fontSize: '13px', color: '#9ca3af' }}>
+                  暂无草稿，可从下方现有白板整理出可复用模板
+                </p>
+              ) : (
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+                    gap: '16px',
+                  }}
+                >
+                  {drafts.map((draft) => (
+                    <div
+                      key={draft._id}
+                      onClick={() => setEditingDraft(draft)}
+                      style={{
+                        borderRadius: '12px',
+                        overflow: 'hidden',
+                        cursor: 'pointer',
+                        border: '1px dashed #d1d5db',
+                        boxShadow: '0 2px 8px rgba(0, 0, 0, 0.06)',
+                        transition: 'all 0.2s',
+                        background: '#fff',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.transform = 'translateY(-4px)';
+                        e.currentTarget.style.boxShadow = '0 8px 24px rgba(0, 0, 0, 0.12)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.transform = 'translateY(0)';
+                        e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.06)';
+                      }}
+                    >
+                      <div
+                        style={{
+                          height: '100px',
+                          background: draft.preview || 'linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: '36px',
+                        }}
+                      >
+                        {draft.icon || '✏️'}
+                      </div>
+                      <div style={{ padding: '12px 16px' }}>
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: '8px',
+                          }}
+                        >
+                          <h4
+                            style={{
+                              margin: 0,
+                              fontSize: '14px',
+                              fontWeight: 600,
+                              color: '#1a1a1a',
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                            }}
+                          >
+                            {draft.name || '未命名模板'}
+                          </h4>
+                          <span
+                            style={{
+                              flexShrink: 0,
+                              fontSize: '11px',
+                              fontWeight: 500,
+                              color: draft.status === 'published' ? '#15803d' : '#b45309',
+                              background: draft.status === 'published' ? '#f0fdf4' : '#fffbeb',
+                              padding: '2px 8px',
+                              borderRadius: '10px',
+                            }}
+                          >
+                            {draft.status === 'published' ? '已发布' : '草稿'}
+                          </span>
+                        </div>
+                        <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#6b7280' }}>
+                          {draft.versions.length} 个版本 · 当前 V
+                          {draft.versions.find((v) => v.versionId === draft.currentVersionId)?.versionNumber ?? 1}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div style={{ marginTop: '24px' }}>
+              <h3
+                style={{
+                  margin: '0 0 16px',
+                  fontSize: '15px',
+                  fontWeight: 600,
+                  color: '#374151',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                }}
+              >
+                <span>📦</span> 从白板整理模板
+                <span style={{ fontSize: '12px', color: '#9ca3af', fontWeight: 400 }}>
+                  把现有白板保存为模板草稿
+                </span>
+              </h3>
+              {boards.length === 0 ? (
+                <p style={{ margin: 0, fontSize: '13px', color: '#9ca3af' }}>暂无可整理的白板</p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {boards.map((board) => (
+                    <div
+                      key={board._id}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '10px 14px',
+                        borderRadius: '8px',
+                        border: '1px solid #e5e7eb',
+                        background: '#fff',
+                      }}
+                    >
+                      <div>
+                        <div style={{ fontSize: '14px', fontWeight: 500, color: '#1a1a1a' }}>
+                          {board.name}
+                        </div>
+                        <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '2px' }}>
+                          {board.layers.length} 个图层
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleCreateDraftFromBoard(board)}
+                        disabled={draftWorking}
+                        style={{
+                          padding: '6px 14px',
+                          fontSize: '13px',
+                          fontWeight: 500,
+                          color: '#667eea',
+                          background: '#eef2ff',
+                          border: 'none',
+                          borderRadius: '6px',
+                          cursor: draftWorking ? 'not-allowed' : 'pointer',
+                          opacity: draftWorking ? 0.6 : 1,
+                        }}
+                      >
+                        整理为模板
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
           <div
@@ -515,6 +745,21 @@ export const TemplateCenter: React.FC<TemplateCenterProps> = ({ isOpen, onClose,
                 }}
               >
                 {error}
+              </div>
+            )}
+            {notice && (
+              <div
+                style={{
+                  padding: '10px 14px',
+                  background: '#f0fdf4',
+                  border: '1px solid #bbf7d0',
+                  borderRadius: '8px',
+                  color: '#15803d',
+                  fontSize: '13px',
+                  marginBottom: '12px',
+                }}
+              >
+                {notice}
               </div>
             )}
             <div
@@ -639,6 +884,15 @@ export const TemplateCenter: React.FC<TemplateCenterProps> = ({ isOpen, onClose,
           </div>
         </form>
       </div>
+
+      {editingDraft && (
+        <TemplateDraftEditor
+          draft={editingDraft}
+          onClose={() => setEditingDraft(null)}
+          onChanged={loadDrafts}
+          onPublished={handlePublished}
+        />
+      )}
 
       <style>{`
         @keyframes pulse {
